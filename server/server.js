@@ -92,6 +92,26 @@ app.get('/api/health', async (req, res) => {
   }
 })
 
+// One-time admin init endpoint to force schema creation/seed
+// Protect with ADMIN_INIT_KEY; if not set, require ADMIN_REGISTRATION_KEY
+app.post('/api/admin/init', async (req, res) => {
+  const key = req.query.key || req.body?.key
+  const requiredKey = process.env.ADMIN_INIT_KEY || process.env.ADMIN_REGISTRATION_KEY
+  if (requiredKey && key !== requiredKey) {
+    return res.status(403).json({ message: 'Forbidden' })
+  }
+  try {
+    const db = require('./database/db')
+    if (typeof db.initDatabase === 'function') {
+      await db.initDatabase()
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('Admin init error:', e && e.message)
+    res.status(500).json({ message: e && e.message, code: e && e.code })
+  }
+})
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500
