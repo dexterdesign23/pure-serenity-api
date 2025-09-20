@@ -9,14 +9,19 @@ if (USE_SQLITE) {
   console.log('🛢️ Using MySQL/MariaDB database')
   const mysql = require('mysql2/promise')
   const url = new URL(process.env.MYSQL_URL)
+  const socketPath = process.env.MYSQL_SOCKET || undefined
+  const baseConfig = socketPath
+    ? { socketPath }
+    : { host: url.hostname, port: url.port || 3306 }
   const pool = mysql.createPool({
-    host: url.hostname,
-    port: url.port || 3306,
+    ...baseConfig,
     user: url.username,
     password: url.password,
     database: url.pathname.replace(/^\//, ''),
     connectionLimit: 10,
     timezone: 'Z',
+    multipleStatements: true,
+    waitForConnections: true,
   })
 
   const query = async (text, params = []) => {
@@ -36,8 +41,8 @@ if (USE_SQLITE) {
     const conn = await pool.getConnection()
     try {
       await conn.beginTransaction()
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS users (
+      const stmts = [
+        `CREATE TABLE IF NOT EXISTS users (
           id INT AUTO_INCREMENT PRIMARY KEY,
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
@@ -46,8 +51,8 @@ if (USE_SQLITE) {
           role VARCHAR(20) DEFAULT 'admin',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS services (
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS services (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
           description TEXT,
@@ -57,8 +62,8 @@ if (USE_SQLITE) {
           is_active TINYINT(1) DEFAULT 1,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS locations (
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS locations (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
           address VARCHAR(255) NOT NULL,
@@ -73,8 +78,8 @@ if (USE_SQLITE) {
           longitude DECIMAL(11,8),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS bookings (
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS bookings (
           id INT AUTO_INCREMENT PRIMARY KEY,
           client_first_name VARCHAR(100) NOT NULL,
           client_last_name VARCHAR(100) NOT NULL,
@@ -90,10 +95,10 @@ if (USE_SQLITE) {
           notes TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (service_id) REFERENCES services(id),
-          FOREIGN KEY (location_id) REFERENCES locations(id)
-        );
-        CREATE TABLE IF NOT EXISTS classes (
+          CONSTRAINT fk_bookings_service FOREIGN KEY (service_id) REFERENCES services(id),
+          CONSTRAINT fk_bookings_location FOREIGN KEY (location_id) REFERENCES locations(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS classes (
           id INT AUTO_INCREMENT PRIMARY KEY,
           title VARCHAR(100) NOT NULL,
           description TEXT,
@@ -109,9 +114,9 @@ if (USE_SQLITE) {
           is_active TINYINT(1) DEFAULT 1,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (location_id) REFERENCES locations(id)
-        );
-        CREATE TABLE IF NOT EXISTS class_enrollments (
+          CONSTRAINT fk_classes_location FOREIGN KEY (location_id) REFERENCES locations(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS class_enrollments (
           id INT AUTO_INCREMENT PRIMARY KEY,
           class_id INT NOT NULL,
           participant_first_name VARCHAR(100) NOT NULL,
@@ -120,9 +125,13 @@ if (USE_SQLITE) {
           participant_phone VARCHAR(20),
           enrollment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           payment_status VARCHAR(20) DEFAULT 'pending',
-          FOREIGN KEY (class_id) REFERENCES classes(id)
-        );
-      `)
+          CONSTRAINT fk_enrollments_class FOREIGN KEY (class_id) REFERENCES classes(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+      ]
+
+      for (const sql of stmts) {
+        await conn.query(sql)
+      }
       // Seed admin user from environment if provided
       if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
         const bcrypt = require('bcryptjs')
