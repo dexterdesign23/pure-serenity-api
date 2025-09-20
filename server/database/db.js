@@ -1,10 +1,161 @@
-// Check if we should use SQLite or PostgreSQL
-// Force SQLite for development unless explicitly configured for PostgreSQL
-const USE_SQLITE = true // Change to: !process.env.DATABASE_URL || process.env.USE_SQLITE === 'true' when you want PostgreSQL
+// Choose backend based on env: prefer MySQL/MariaDB if MYSQL_URL is set; else PostgreSQL if DATABASE_URL; else SQLite.
+const HAS_MYSQL = !!process.env.MYSQL_URL
+const USE_SQLITE = (!HAS_MYSQL && !process.env.DATABASE_URL) || (process.env.USE_SQLITE === 'true')
 
 if (USE_SQLITE) {
   console.log('🗄️  Using SQLite database for development')
   module.exports = require('./db-sqlite')
+} else if (HAS_MYSQL) {
+  console.log('🛢️ Using MySQL/MariaDB database')
+  const mysql = require('mysql2/promise')
+  const url = new URL(process.env.MYSQL_URL)
+  const pool = mysql.createPool({
+    host: url.hostname,
+    port: url.port || 3306,
+    user: url.username,
+    password: url.password,
+    database: url.pathname.replace(/^\//, ''),
+    connectionLimit: 10,
+    timezone: 'Z',
+  })
+
+  const query = async (text, params = []) => {
+    try {
+      // Convert $1, $2 → ? placeholders
+      let sql = text
+      for (let i = params.length; i >= 1; i--) sql = sql.replace(new RegExp(`\\$${i}`, 'g'), '?')
+      const [rows] = await pool.query(sql, params)
+      return { rows, rowCount: rows.length }
+    } catch (err) {
+      console.error('MySQL query error:', err.message)
+      throw err
+    }
+  }
+
+  const initDatabase = async () => {
+    const conn = await pool.getConnection()
+    try {
+      await conn.beginTransaction()
+      await conn.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          first_name VARCHAR(100) NOT NULL,
+          last_name VARCHAR(100) NOT NULL,
+          role VARCHAR(20) DEFAULT 'admin',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS services (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          description TEXT,
+          duration INT NOT NULL,
+          price DECIMAL(10,2) NOT NULL,
+          category VARCHAR(50),
+          is_active TINYINT(1) DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS locations (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          address VARCHAR(255) NOT NULL,
+          city VARCHAR(100) NOT NULL,
+          state VARCHAR(10) NOT NULL,
+          zip_code VARCHAR(10) NOT NULL,
+          phone VARCHAR(20),
+          email VARCHAR(255),
+          is_primary TINYINT(1) DEFAULT 0,
+          is_active TINYINT(1) DEFAULT 1,
+          latitude DECIMAL(10,8),
+          longitude DECIMAL(11,8),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS bookings (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          client_first_name VARCHAR(100) NOT NULL,
+          client_last_name VARCHAR(100) NOT NULL,
+          client_email VARCHAR(255) NOT NULL,
+          client_phone VARCHAR(20),
+          service_id INT NOT NULL,
+          location_id INT NOT NULL,
+          appointment_date DATE NOT NULL,
+          appointment_time TIME NOT NULL,
+          duration INT NOT NULL,
+          price DECIMAL(10,2) NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending',
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (service_id) REFERENCES services(id),
+          FOREIGN KEY (location_id) REFERENCES locations(id)
+        );
+        CREATE TABLE IF NOT EXISTS classes (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          title VARCHAR(100) NOT NULL,
+          description TEXT,
+          instructor VARCHAR(100) NOT NULL,
+          class_date DATE NOT NULL,
+          start_time TIME NOT NULL,
+          end_time TIME NOT NULL,
+          location_id INT NOT NULL,
+          max_participants INT DEFAULT 20,
+          current_participants INT DEFAULT 0,
+          price DECIMAL(10,2) NOT NULL,
+          category VARCHAR(50),
+          is_active TINYINT(1) DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (location_id) REFERENCES locations(id)
+        );
+        CREATE TABLE IF NOT EXISTS class_enrollments (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          class_id INT NOT NULL,
+          participant_first_name VARCHAR(100) NOT NULL,
+          participant_last_name VARCHAR(100) NOT NULL,
+          participant_email VARCHAR(255) NOT NULL,
+          participant_phone VARCHAR(20),
+          enrollment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          payment_status VARCHAR(20) DEFAULT 'pending',
+          FOREIGN KEY (class_id) REFERENCES classes(id)
+        );
+      `)
+      // Seed admin user from environment if provided
+      if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+        const bcrypt = require('bcryptjs')
+        const adminEmail = String(process.env.ADMIN_EMAIL).toLowerCase()
+        const [existing] = await conn.query('SELECT id FROM users WHERE email = ?', [adminEmail])
+        if (existing.length === 0) {
+          const hash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
+          await conn.query(
+            'INSERT INTO users (email, password_hash, first_name, last_name, role) VALUES (?, ?, ?, ?, ?)',
+            [
+              adminEmail,
+              hash,
+              process.env.ADMIN_FIRST_NAME || 'Admin',
+              process.env.ADMIN_LAST_NAME || 'User',
+              'admin'
+            ]
+          )
+          console.log('👤 Seeded admin user from environment')
+        }
+      }
+
+      await conn.commit()
+      console.log('✅ MySQL tables initialized successfully')
+    } catch (e) {
+      await conn.rollback()
+      console.error('❌ MySQL initialization error:', e)
+      throw e
+    } finally {
+      conn.release()
+    }
+  }
+
+  module.exports = { query, initDatabase }
 } else {
   console.log('🐘 Using PostgreSQL database')
   
@@ -187,6 +338,27 @@ if (USE_SQLITE) {
       `)
       
       console.log('✅ Database tables initialized successfully')
+
+      // Seed default admin user if provided via environment variables
+      if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+        const bcrypt = require('bcryptjs')
+        const { rows } = await client.query('SELECT id FROM users WHERE email = $1', [process.env.ADMIN_EMAIL.toLowerCase()])
+        if (rows.length === 0) {
+          const password_hash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12)
+          await client.query(
+            `INSERT INTO users (email, password_hash, first_name, last_name, role)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              process.env.ADMIN_EMAIL.toLowerCase(),
+              password_hash,
+              process.env.ADMIN_FIRST_NAME || 'Admin',
+              process.env.ADMIN_LAST_NAME || 'User',
+              'admin'
+            ]
+          )
+          console.log('👤 Seeded admin user from environment')
+        }
+      }
       client.release()
     } catch (error) {
       console.error('❌ Database initialization error:', error)

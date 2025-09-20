@@ -10,12 +10,8 @@ const PORT = process.env.PORT || 3001
 // Import route modules
 let authRoutes, bookingRoutes, locationRoutes, classRoutes, servicesRoutes
 
-// Check database availability and choose routes accordingly
-// Force SQLite for development unless explicitly configured for PostgreSQL
-const USE_SQLITE = true // Change to: !process.env.DATABASE_URL || process.env.USE_SQLITE === 'true' when you want PostgreSQL
-const isDatabaseAvailable = true // We always have a database (either SQLite or PostgreSQL)
-
-if (isDatabaseAvailable) {
+// Always use real database routes (MySQL/MariaDB)
+{
   // Use real database routes
   authRoutes = require('./routes/auth')
   bookingRoutes = require('./routes/booking')
@@ -33,19 +29,6 @@ if (isDatabaseAvailable) {
       console.error('❌ Database initialization failed:', error)
     })
   }
-} else {
-  // Use mock routes for demo
-  authRoutes = require('./routes/auth-mock')
-  bookingRoutes = require('./routes/booking-mock')
-  locationRoutes = require('./routes/locations-mock')
-  // Create simple mock routes for classes and services
-  classRoutes = require('express').Router()
-  servicesRoutes = require('express').Router()
-  
-  classRoutes.get('*', (req, res) => res.json({ classes: [], registrations: [], pagination: { total: 0 } }))
-  servicesRoutes.get('*', (req, res) => res.json({ services: [] }))
-  
-  console.log('🎭 Using mock routes for demo (database not available)')
 }
 
 // Middleware
