@@ -94,7 +94,7 @@ app.get('/api/health', async (req, res) => {
 
 // One-time admin init endpoint to force schema creation/seed
 // Protect with ADMIN_INIT_KEY; if not set, require ADMIN_REGISTRATION_KEY
-app.post('/api/admin/init', async (req, res) => {
+app.all('/api/admin/init', async (req, res) => {
   const key = req.query.key || req.body?.key
   const requiredKey = process.env.ADMIN_INIT_KEY || process.env.ADMIN_REGISTRATION_KEY
   if (requiredKey && key !== requiredKey) {
