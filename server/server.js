@@ -81,7 +81,14 @@ app.get('/api/health', async (req, res) => {
       environment: process.env.NODE_ENV || 'development'
     })
   } catch (e) {
-    res.status(500).json({ status: 'DEGRADED', db: 'ERROR', message: 'Database check failed', requestId: req.id })
+    console.error('Health DB error:', e && (e.code || e.message), e && e.message)
+    res.status(500).json({ 
+      status: 'DEGRADED', 
+      db: 'ERROR', 
+      message: e && e.message ? e.message : 'Database check failed', 
+      code: e && e.code, 
+      requestId: req.id 
+    })
   }
 })
 
