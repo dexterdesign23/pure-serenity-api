@@ -58,13 +58,13 @@ router.get('/admin', authenticateToken, validateQuery(listBookingsQuery), async 
       params.push(date)
     }
     
-    queryText += ` ORDER BY b.created_at DESC LIMIT $${++paramCount} OFFSET $${++paramCount}`
-    params.push(limitNum, offset)
+    // MySQL can be finicky with placeholders in LIMIT/OFFSET; inline safe integers
+    queryText += ` ORDER BY b.created_at DESC LIMIT ${limitNum} OFFSET ${offset}`
     
     const result = await query(queryText, params)
     
     // Get total count for pagination
-    let countQuery = 'SELECT COUNT(*) FROM bookings WHERE 1=1'
+    let countQuery = 'SELECT COUNT(*) AS count FROM bookings WHERE 1=1'
     const countParams = []
     let countParamCount = 0
     
@@ -79,7 +79,7 @@ router.get('/admin', authenticateToken, validateQuery(listBookingsQuery), async 
     }
     
     const countResult = await query(countQuery, countParams)
-    const total = parseInt(countResult.rows[0].count)
+    const total = parseInt(countResult.rows[0].count || countResult.rows[0].COUNT || 0)
     
     res.json({
       bookings: result.rows,
@@ -131,18 +131,13 @@ router.get('/', authenticateToken, validateQuery(listBookingsQuery), async (req,
     
     queryText += ` ORDER BY b.appointment_date DESC, b.appointment_time DESC`
     
-    paramCount++
-    queryText += ` LIMIT $${paramCount}`
-    params.push(limit)
-    
-    paramCount++
-    queryText += ` OFFSET $${paramCount}`
-    params.push(offset)
+    // Inline LIMIT/OFFSET to avoid MySQL prepared statement quirks
+    queryText += ` LIMIT ${parseInt(limit, 10)} OFFSET ${parseInt(offset, 10)}`
     
     const result = await query(queryText, params)
     
     // Get total count
-    let countQuery = 'SELECT COUNT(*) FROM bookings WHERE 1=1'
+    let countQuery = 'SELECT COUNT(*) AS count FROM bookings WHERE 1=1'
     const countParams = []
     let countParamCount = 0
     
@@ -159,7 +154,7 @@ router.get('/', authenticateToken, validateQuery(listBookingsQuery), async (req,
     }
     
     const countResult = await query(countQuery, countParams)
-    const total = parseInt(countResult.rows[0].count)
+    const total = parseInt(countResult.rows[0].count || countResult.rows[0].COUNT || 0)
     
     res.json({
       bookings: result.rows,
