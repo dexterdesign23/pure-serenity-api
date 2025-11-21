@@ -115,9 +115,12 @@ app.all('/api/admin/init', async (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   const status = err.statusCode || 500
-  const payload = { message: status === 500 ? 'Internal server error' : err.message, requestId: req.id }
-  if (process.env.NODE_ENV !== 'production') payload.error = err.message
-  console.error('Error:', { requestId: req.id, status, error: err.message })
+  const payload = { 
+    message: status === 500 ? (err && err.message ? err.message : 'Internal server error') : err.message, 
+    code: err && err.code,
+    requestId: req.id 
+  }
+  console.error('Error:', { requestId: req.id, status, code: err && err.code, error: err && err.message, stack: err && err.stack })
   res.status(status).json(payload)
 })
 
@@ -126,22 +129,31 @@ app.use('*', (req, res) => {
   res.status(404).json({ message: 'API endpoint not found' })
 })
 
-// Start server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Pure Serenity API Server running on port ${PORT}`)
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`)
-  console.log(`🌐 CORS enabled for: ${process.env.NODE_ENV === 'production' 
-    ? 'Production domains' 
-    : 'http://localhost:3000, http://localhost:3002'
-  }`)
-})
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server')
-  server.close(() => {
-    console.log('HTTP server closed')
+// Start server only if not being required by another module (like Passenger)
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Pure Serenity API Server running on port ${PORT}`)
+    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`)
+    console.log(`🌐 CORS enabled for: ${process.env.NODE_ENV === 'production' 
+      ? 'Production domains' 
+      : 'http://localhost:3000, http://localhost:3002'
+    }`)
   })
-})
+
+  // Set server timeout to 60 seconds (prevents 504 Gateway Timeout)
+  server.timeout = 60000
+  server.keepAliveTimeout = 65000
+  server.headersTimeout = 66000
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM signal received: closing HTTP server')
+    server.close(() => {
+      console.log('HTTP server closed')
+    })
+  })
+} else {
+  console.log('📦 App exported for external server (Passenger/PM2)')
+}
 
 module.exports = app

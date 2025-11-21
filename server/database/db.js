@@ -22,6 +22,9 @@ if (USE_SQLITE) {
     timezone: 'Z',
     multipleStatements: true,
     waitForConnections: true,
+    connectTimeout: 10000,        // 10 seconds to establish connection
+    acquireTimeout: 10000,        // 10 seconds to acquire connection from pool
+    queueLimit: 0,                // unlimited queue
   })
 
   const query = async (text, params = []) => {
@@ -176,7 +179,8 @@ if (USE_SQLITE) {
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,  // Increased to 10 seconds
+    query_timeout: 30000,             // 30 second query timeout
   })
 
   // Test connection

@@ -224,10 +224,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 router.get('/meta/categories', async (req, res) => {
   try {
     const result = await query(`
-      SELECT DISTINCT category, COUNT(*) as count 
-      FROM services 
-      WHERE is_active = true 
-      GROUP BY category 
+      SELECT COALESCE(category, 'uncategorized') AS category, COUNT(*) as count
+      FROM services
+      WHERE is_active = 1
+      GROUP BY category
       ORDER BY category
     `)
     
@@ -235,8 +235,8 @@ router.get('/meta/categories', async (req, res) => {
       categories: result.rows
     })
   } catch (error) {
-    console.error('Error fetching service categories:', error)
-    res.status(500).json({ message: 'Failed to fetch service categories' })
+    console.error('Error fetching service categories:', error && error.message)
+    res.status(500).json({ message: error && error.message ? error.message : 'Failed to fetch service categories' })
   }
 })
 
